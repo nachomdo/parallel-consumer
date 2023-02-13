@@ -36,15 +36,33 @@ import static pl.tlinkowski.unij.api.UniLists.of;
 public class CoreApp {
 
 
-    String inputTopic = "input-topic-" + RandomUtils.nextInt();
-    String outputTopic = "output-topic-" + RandomUtils.nextInt();
+    String inputTopic = "input-topic";
+    String outputTopic = "output-topic";
 
     Consumer<String, String> getKafkaConsumer() {
-        return new KafkaConsumer<>(new Properties());
+        var props = new Properties();
+        props.put("bootstrap.servers", "localhost:9092");
+        props.put("group.id", "test");
+        props.put("enable.auto.commit", "false");
+        props.put("max.poll.interval.ms", "360000");
+        props.put("max.poll.records", "48");
+        props.put("session.timeout.ms","360000");
+        props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+
+        return new KafkaConsumer<>(props);
     }
 
     Producer<String, String> getKafkaProducer() {
-        return new KafkaProducer<>(new Properties());
+        var props = new Properties();
+        props.put("bootstrap.servers", "localhost:9092");
+        props.put("max.request.size", 30000000);
+        props.put("batch.size", 250000);
+        props.put("linger.ms", 65);
+        props.put("transactional.id", "test"+RandomUtils.nextInt());
+        props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        return new KafkaProducer<>(props);
     }
 
     ParallelStreamProcessor<String, String> parallelConsumer;
@@ -74,9 +92,11 @@ public class CoreApp {
 
         var options = ParallelConsumerOptions.<String, String>builder()
                 .ordering(KEY) // <2>
-                .maxConcurrency(1000) // <3>
+                .maxConcurrency(16) // <3>
                 .consumer(kafkaConsumer)
                 .producer(kafkaProducer)
+                .commitMode(ParallelConsumerOptions.CommitMode.PERIODIC_TRANSACTIONAL_PRODUCER)
+                .produceLockAcquisitionTimeout(Duration.ofMinutes(2))
                 .build();
 
         ParallelStreamProcessor<String, String> eosStreamProcessor =
@@ -230,4 +250,8 @@ public class CoreApp {
         return msg("{}, {}", consumerRecords, failureCount);
     }
 
+    public static void main(String[] args){
+        System.out.println("Running example...");
+        new CoreApp().runPollAndProduce();
+    }
 }
