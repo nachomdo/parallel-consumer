@@ -1,7 +1,7 @@
 package io.confluent.parallelconsumer.internal;
 
 /*-
- * Copyright (C) 2020-2022 Confluent, Inc.
+ * Copyright (C) 2020-2023 Confluent, Inc.
  */
 
 import io.confluent.csid.utils.TimeUtils;
@@ -356,9 +356,13 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
      * <p>
      * Make sure the calling thread is the thread which performs commit - i.e. is the {@link OffsetCommitter}.
      */
+    @SneakyThrows
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
         log.debug("Partitions revoked {}, state: {}", partitions, state);
+        // wait for the commit transaction to complete
+        maybeAcquireCommitLock();
+
         numberOfAssignedPartitions = numberOfAssignedPartitions - partitions.size();
 
         try {
@@ -370,7 +374,6 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         } catch (Exception e) {
             throw new InternalRuntimeException("onPartitionsRevoked event error", e);
         }
-
         //
         try {
             usersConsumerRebalanceListener.ifPresent(listener -> listener.onPartitionsRevoked(partitions));
@@ -677,7 +680,6 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
                                    Consumer<R> callback) throws TimeoutException, ExecutionException, InterruptedException {
         maybeWakeupPoller();
 
-        //
         final boolean shouldTryCommitNow = maybeAcquireCommitLock();
 
         // make sure all work that's been completed are arranged ready for commit
