@@ -104,6 +104,8 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
 
     private Optional<Future<Boolean>> controlThreadFuture = Optional.empty();
 
+    private final Semaphore revokingInProgress = new Semaphore(1);
+
     // todo make package level
     @Getter(AccessLevel.PUBLIC)
     protected final WorkManager<K, V> wm;
@@ -360,7 +362,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
         log.debug("Partitions revoked {}, state: {}", partitions, state);
-        maybeAcquireCommitLock();
+        revokingInProgress.acquire();
         numberOfAssignedPartitions = numberOfAssignedPartitions - partitions.size();
 
         try {
@@ -371,6 +373,8 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
             wm.onPartitionsRevoked(partitions);
         } catch (Exception e) {
             throw new InternalRuntimeException("onPartitionsRevoked event error", e);
+        } finally {
+            revokingInProgress.release();
         }
 
         //
@@ -672,6 +676,10 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         this.myId.ifPresent(id -> MDC.put(MDC_INSTANCE_ID, id));
     }
 
+    private boolean isPartitionsRevocationInProgress() {
+        return revokingInProgress.availablePermits() < 1;
+    }
+
     /**
      * Main control loop
      */
@@ -679,7 +687,6 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
                                    Consumer<R> callback) throws TimeoutException, ExecutionException, InterruptedException {
         maybeWakeupPoller();
 
-        //
         final boolean shouldTryCommitNow = maybeAcquireCommitLock();
 
         // make sure all work that's been completed are arranged ready for commit
@@ -687,9 +694,12 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         processWorkCompleteMailBox(timeToBlockFor);
 
         //
-        if (shouldTryCommitNow) {
+        if (!isPartitionsRevocationInProgress() && shouldTryCommitNow) {
             // offsets will be committed when the consumer has its partitions revoked
             commitOffsetsThatAreReady();
+        } else if (isPartitionsRevocationInProgress() && shouldTryCommitNow) {
+            log.debug("Partitions revocation in progress, not committing offsets");
+            this.producerManager.ifPresent(ProducerManager::releaseCommitLock);
         }
 
         // distribute more work

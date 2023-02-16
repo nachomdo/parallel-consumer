@@ -1,7 +1,7 @@
 package io.confluent.parallelconsumer.internal;
 
 /*-
- * Copyright (C) 2020-2022 Confluent, Inc.
+ * Copyright (C) 2020-2023 Confluent, Inc.
  */
 
 import io.confluent.parallelconsumer.*;
@@ -396,7 +396,7 @@ public class ProducerManager<K, V> extends AbstractOffsetCommitter<K, V> impleme
         }
     }
 
-    private void releaseCommitLock() {
+    public void releaseCommitLock() {
         log.debug("Releasing commit lock...");
         ReentrantReadWriteLock.WriteLock writeLock = producerTransactionLock.writeLock();
         if (!producerTransactionLock.isWriteLockedByCurrentThread())
