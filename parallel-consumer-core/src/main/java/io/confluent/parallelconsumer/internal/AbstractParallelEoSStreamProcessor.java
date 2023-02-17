@@ -1,7 +1,7 @@
 package io.confluent.parallelconsumer.internal;
 
 /*-
- * Copyright (C) 2020-2023 Confluent, Inc.
+ * Copyright (C) 2020-2022 Confluent, Inc.
  */
 
 import io.confluent.csid.utils.TimeUtils;
@@ -103,8 +103,6 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
     protected final ThreadPoolExecutor workerThreadPool;
 
     private Optional<Future<Boolean>> controlThreadFuture = Optional.empty();
-
-    private final Semaphore revokingInProgress = new Semaphore(1);
 
     // todo make package level
     @Getter(AccessLevel.PUBLIC)
@@ -358,11 +356,9 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
      * <p>
      * Make sure the calling thread is the thread which performs commit - i.e. is the {@link OffsetCommitter}.
      */
-    @SneakyThrows
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
         log.debug("Partitions revoked {}, state: {}", partitions, state);
-        revokingInProgress.acquire();
         numberOfAssignedPartitions = numberOfAssignedPartitions - partitions.size();
 
         try {
@@ -373,8 +369,6 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
             wm.onPartitionsRevoked(partitions);
         } catch (Exception e) {
             throw new InternalRuntimeException("onPartitionsRevoked event error", e);
-        } finally {
-            revokingInProgress.release();
         }
 
         //
@@ -676,10 +670,6 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         this.myId.ifPresent(id -> MDC.put(MDC_INSTANCE_ID, id));
     }
 
-    private boolean isPartitionsRevocationInProgress() {
-        return revokingInProgress.availablePermits() < 1;
-    }
-
     /**
      * Main control loop
      */
@@ -687,6 +677,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
                                    Consumer<R> callback) throws TimeoutException, ExecutionException, InterruptedException {
         maybeWakeupPoller();
 
+        //
         final boolean shouldTryCommitNow = maybeAcquireCommitLock();
 
         // make sure all work that's been completed are arranged ready for commit
@@ -694,12 +685,9 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         processWorkCompleteMailBox(timeToBlockFor);
 
         //
-        if (!isPartitionsRevocationInProgress() && shouldTryCommitNow) {
+        if (shouldTryCommitNow) {
             // offsets will be committed when the consumer has its partitions revoked
             commitOffsetsThatAreReady();
-        } else if (isPartitionsRevocationInProgress() && shouldTryCommitNow) {
-            log.debug("Partitions revocation in progress, not committing offsets");
-            this.producerManager.ifPresent(ProducerManager::releaseCommitLock);
         }
 
         // distribute more work
