@@ -1,7 +1,7 @@
 package io.confluent.parallelconsumer;
 
 /*-
- * Copyright (C) 2020-2022 Confluent, Inc.
+ * Copyright (C) 2020-2023 Confluent, Inc.
  */
 
 import io.confluent.csid.utils.TimeUtils;
@@ -13,6 +13,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.errors.ProducerFencedException;
 import pl.tlinkowski.unij.api.UniLists;
 
 import java.util.ArrayList;
@@ -132,6 +133,10 @@ public class ParallelEoSStreamProcessor<K, V> extends AbstractParallelEoSStreamP
                 }
                 return null; // return from timer function
             });
+        } catch (ProducerFencedException exc) {
+            log.error("Producer fenced, shutting down");
+            this.close();
+
         } catch (Exception e) {
             throw new InternalRuntimeException("Error while waiting for produce results", e);
         }
