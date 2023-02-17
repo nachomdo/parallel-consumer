@@ -1,7 +1,7 @@
 package io.confluent.parallelconsumer.internal;
 
 /*-
- * Copyright (C) 2020-2022 Confluent, Inc.
+ * Copyright (C) 2020-2023 Confluent, Inc.
  */
 
 import io.confluent.csid.utils.TimeUtils;
@@ -357,8 +357,10 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
      * Make sure the calling thread is the thread which performs commit - i.e. is the {@link OffsetCommitter}.
      */
     @Override
+    @SneakyThrows
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
         log.debug("Partitions revoked {}, state: {}", partitions, state);
+        maybeAcquireCommitLock();
         numberOfAssignedPartitions = numberOfAssignedPartitions - partitions.size();
 
         try {
