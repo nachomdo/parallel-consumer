@@ -1,0 +1,74 @@
+#
+# Copyright (C) 2020-2023 Confluent, Inc.
+#
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: pc-metrics
+  namespace: confluent
+  labels:
+    app: pc
+spec:
+  ports:
+  - port: 7080
+    name: prometheus
+  clusterIP: None
+  selector:
+    app: pc
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pc
+  namespace: confluent
+spec:
+  selector:
+    matchLabels:
+      app: pc
+  serviceName: "pc-metrics"
+  replicas: 10
+  minReadySeconds: 10 # by default is 0
+  template:
+    metadata:
+      labels:
+        app: pc
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: pc
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "2048Mi"
+            cpu: "1000m"
+        env:
+        - name: KAFKA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pc-secrets
+              key: password
+        - name: KAFKA_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: pc-secrets
+              key: username
+        - name: BOOTSTRAP_SERVERS
+          value: pkc-41wq6.eu-west-2.aws.confluent.cloud:9092
+        - name: GROUP_MEMBER_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: GROUP_ID
+          value: k8s-fixed-pc
+        - name: OUTPUT_TOPIC
+          value: test2
+        - name: INPUT_TOPIC
+          value: pc-test-input
+        image: pc-image
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 7080
+          name: prometheus

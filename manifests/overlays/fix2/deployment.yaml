@@ -1,0 +1,35 @@
+#
+# Copyright (C) 2020-2023 Confluent, Inc.
+#
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pc
+  namespace: confluent
+spec:
+  template:
+    metadata:
+      annotations:
+        vault.hashicorp.com/agent-inject: 'true'
+        vault.hashicorp.com/agent-inject-status: 'update'
+        vault.hashicorp.com/agent-cache-enable: 'true'
+        vault.hashicorp.com/service: 'http://vault-internal.default:8200'
+        vault.hashicorp.com/role: 'pc-app'
+        vault.hashicorp.com/secret-volume-path: '/vault/secrets/'
+        vault.hashicorp.com/agent-inject-secret-confluent-cloud-config.env: 'ccloud/creds/test2'
+        vault.hashicorp.com/agent-inject-template-confluent-cloud-config.env: |
+          {{- with secret "ccloud/creds/test2" -}}
+          export KAFKA_USERNAME={{ .Data.key_id }}
+          export KAFKA_PASSWORD={{ .Data.secret }}
+          {{- end -}}
+    spec:
+      serviceAccountName: pc-app
+      containers:
+      - name: pc
+        args: ['sh', '-c', 'source /vault/secrets/config && java -javaagent:/tmp/jmx_prometheus_javaagent-0.17.2.jar=7080:promconfig.yaml -jar /tmp/parallel-consumer-example-core-0.5.2.5-SNAPSHOT.jar']
+        env:
+        - name: JAVA_TOOL_OPTIONS
+          value: -Dlog4j.configuration=file:///tmp/log4j.properties -DlogLevel=INFO
+        - name: GROUP_ID
+          value: k8s-fixed-pc

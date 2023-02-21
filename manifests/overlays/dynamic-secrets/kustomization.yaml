@@ -1,0 +1,25 @@
+#
+# Copyright (C) 2020-2023 Confluent, Inc.
+#
+
+bases:
+- ../../base
+
+patchesStrategicMerge:
+- deployment.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+images:
+  - name: pc-image
+    newName: nachomdo/pc
+    newTag: idle
+
+helmCharts:
+- name: vault
+  repo: https://helm.releases.hashicorp.com
+  releaseName: vault
+  namespace: vault
+  valuesFile: vault-values.yaml
+  includeCRDs: true

@@ -1,0 +1,19 @@
+#
+# Copyright (C) 2020-2023 Confluent, Inc.
+#
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pc
+  namespace: confluent
+spec:
+  template:
+    spec:
+      containers:
+      - name: pc
+        env:
+        - name: JAVA_TOOL_OPTIONS
+          value: -Dlog4j.configuration=file:///tmp/log4j.properties -DlogLevel=INFO
+        - name: GROUP_ID
+          value: k8s-semaphore-pc

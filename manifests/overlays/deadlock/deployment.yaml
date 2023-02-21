@@ -1,0 +1,16 @@
+#
+# Copyright (C) 2020-2023 Confluent, Inc.
+#
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pc
+spec:
+  template:
+    spec:
+      containers:
+      - name: pc
+        env:
+        - name: GROUP_ID
+          value: k8s-deadlocked-pc
