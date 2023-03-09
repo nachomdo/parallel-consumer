@@ -16,6 +16,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.internals.ConsumerCoordinator;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.utils.Utils;
 import org.slf4j.MDC;
 
 import javax.naming.InitialContext;
@@ -164,7 +165,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
      * @see #processWorkCompleteMailBox
      */
     private final AtomicBoolean currentlyPollingWorkCompleteMailBox = new AtomicBoolean();
-
+    protected final AtomicBoolean rebalanceInProgress = new AtomicBoolean(false);
     private final OffsetCommitter committer;
 
     /**
@@ -360,9 +361,16 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
         log.debug("Partitions revoked {}, state: {}", partitions, state);
+        rebalanceInProgress.set(true);
         // wait for the commit transaction to complete
-        maybeAcquireCommitLock();
-
+        while (this.producerManager.map(ProducerManager::isTransactionCommittingInProgress).orElse(false)){
+            try {
+                maybeAcquireCommitLock();
+                Utils.sleep(10L);
+            }catch (ConcurrentModificationException exc) {
+                // ignore
+            }
+        }
         numberOfAssignedPartitions = numberOfAssignedPartitions - partitions.size();
 
         try {
@@ -373,12 +381,16 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
             wm.onPartitionsRevoked(partitions);
         } catch (Exception e) {
             throw new InternalRuntimeException("onPartitionsRevoked event error", e);
+        } finally {
+            rebalanceInProgress.set(false);
         }
         //
         try {
             usersConsumerRebalanceListener.ifPresent(listener -> listener.onPartitionsRevoked(partitions));
         } catch (Exception e) {
             throw new ExceptionInUserFunctionException("Error from rebalance listener function after #onPartitionsRevoked", e);
+        } finally {
+            rebalanceInProgress.set(false);
         }
     }
 
@@ -750,9 +762,9 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
      * @return true if committing should either way be attempted now
      */
     private boolean maybeAcquireCommitLock() throws TimeoutException, InterruptedException {
-        final boolean shouldTryCommitNow = isTimeToCommitNow() && wm.isDirty();
+        final boolean shouldTryCommitNow = isTimeToCommitNow() && wm.isDirty() ;
         // could do this optimistically as well, and only get the lock if it's time to commit, so is not frequent
-        if (shouldTryCommitNow && options.isUsingTransactionCommitMode()) {
+        if (shouldTryCommitNow && options.isUsingTransactionCommitMode() && !rebalanceInProgress.get()) {
             // get into write lock queue, so that no new work can be started from here on
             log.debug("Acquiring commit lock pessimistically, before we try to collect offsets for committing");
             //noinspection OptionalGetWithoutIsPresent - options will already be verified
